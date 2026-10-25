@@ -6,7 +6,7 @@ MediaChafa es una biblioteca web y Android para organizar archivos, enlaces y un
 
 ## Descargar la aplicación
 
-- **Android (2.5.1):** [Descargar APK directamente](https://mediachafa-transfer.vercel.app/downloads/MediaChafa.apk?v=2.5.1)
+- **Android (2.5.3):** [Descargar APK directamente](https://mediachafa-transfer.vercel.app/downloads/MediaChafa.apk?v=2.5.1)
 - **Versión web:** [Abrir MediaChafa](https://mediachafa-transfer.vercel.app/)
 
 Descargá el APK y abrilo en Android para instalarlo. En la app podés elegir si querés que recuerde tu sesión; también podés cerrarla en cualquier momento
