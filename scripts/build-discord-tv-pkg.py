@@ -144,7 +144,6 @@ def patch_omni(omni: Path) -> dict:
     temporary = omni.with_suffix(".ja.discord-tv.tmp")
     required = {
         "chrome/orbisfox/content/browser-shell-model.js",
-        "chrome/orbisfox/content/browser-shell-host.js",
         "chrome/orbisfox/content/browser-shell-ui.js",
         "chrome/orbisfox/content/browser.xhtml",
         "chrome/orbisfox/content/browser.css",
@@ -166,27 +165,6 @@ def patch_omni(omni: Path) -> dict:
                         if needle not in text:
                             raise RuntimeError("Could not find default home page setting in Gecko shell model")
                         text = text.replace(needle, f'homePage:"{DISCORD_HOME}"', 1)
-                    elif info.filename.endswith("browser-shell-host.js"):
-                        text = text.replace(
-                            'const homeTarget=()=>{const page=settings.snapshot().homePage;return page&&gates().web?page:"home";};',
-                            f'const homeTarget=()=>"{DISCORD_HOME}";',
-                            1
-                        )
-                        start_marker = "    const urls=pendingSession||[];pendingSession=null;"
-                        start = text.find(start_marker)
-                        if start < 0:
-                            raise RuntimeError("Could not locate the browser startup/session restore block")
-                        end = text.find("\n  };", start)
-                        if end < 0:
-                            raise RuntimeError("Could not find end of browser startup function")
-                        old_block = text[start:end]
-                        if "else if(untouched&&settings.snapshot().homePage)" not in old_block:
-                            raise RuntimeError("Unexpected browser startup policy; refusing a blind patch")
-                        new_block = (
-                            "    pendingSession=null;\n"
-                            f'    if(untouched)load("{DISCORD_HOME}",first);'
-                        )
-                        text = text[:start] + new_block + text[end:]
                     elif info.filename.endswith("browser.xhtml"):
                         text = text.replace("<title>OrbisFox</title>", "<title>Discord TV</title>")
                         text = text.replace('<span id="brand">OrbisFox</span>',
@@ -215,6 +193,34 @@ def patch_omni(omni: Path) -> dict:
         raise RuntimeError("No Discord TV resource modifications were applied")
     temporary.replace(omni)
     return changed
+
+
+def patch_host(host: Path) -> str:
+    if not host.is_file():
+        raise RuntimeError("Original package is missing assets/browser-shell-host.js")
+    text = host.read_text(encoding="utf-8")
+    home = 'const homeTarget=()=>{const page=settings.snapshot().homePage;return page&&gates().web?page:"home";};'
+    if home not in text:
+        raise RuntimeError("Could not locate the actual browser home-target function")
+    text = text.replace(home, f'const homeTarget()=>"{DISCORD_HOME}";', 1)
+    # Keep the function syntax explicit and valid after replacing the expression.
+    text = text.replace(f'const homeTarget()=>"{DISCORD_HOME}";', f'const homeTarget=()=>"{DISCORD_HOME}";', 1)
+    start_marker = "    const urls=pendingSession||[];pendingSession=null;"
+    start = text.find(start_marker)
+    if start < 0:
+        raise RuntimeError("Could not locate browser startup/session restoration")
+    end = text.find("\\n  };", start)
+    if end < 0:
+        end = text.find("\n  };", start)
+    if end < 0:
+        raise RuntimeError("Could not find end of browser startup function")
+    old_block = text[start:end]
+    if "else if(untouched&&settings.snapshot().homePage)" not in old_block:
+        raise RuntimeError("Unexpected browser startup policy; refusing a blind patch")
+    new_block = "    pendingSession=null;\\n" + f'    if(untouched)load("{DISCORD_HOME}",first);'
+    text = text[:start] + new_block.replace("\\n", "\n") + text[end:]
+    host.write_text(text, encoding="utf-8")
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def write_offline_page(path: Path) -> None:
@@ -282,6 +288,14 @@ def main() -> int:
 
     print("3/7 Rebranding Gecko startup, kiosk chrome and icon artwork", flush=True)
     changed = patch_omni(pfs)
+    host_hash = patch_host(project_dir / "assets" / "browser-shell-host.js")
+    model_asset = project_dir / "assets" / "browser-shell-model.js"
+    if model_asset.is_file():
+        model_text = model_asset.read_text(encoding="utf-8")
+        if 'homePage:""' in model_text:
+            model_text = model_text.replace('homePage:""', f'homePage:"{DISCORD_HOME}"', 1)
+            model_asset.write_text(model_text, encoding="utf-8")
+    changed["assets/browser-shell-host.js"] = {"after": host_hash}
     write_offline_page(project_dir / "assets" / "offline.html")
     artwork = work / "artwork"
     artwork.mkdir()
