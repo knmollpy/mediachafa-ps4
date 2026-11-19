@@ -1,0 +1,74 @@
+name: Discord TV PS4 package
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/build-discord-tv-pkg.py"
+      - ".github/workflows/discord-tv-pkg.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout build script
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install image tooling
+        run: python -m pip install --disable-pip-version-check Pillow==11.1.0
+
+      - name: Download original OrbisFox 0.69 alpha package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/original"
+          curl --fail --location --retry 5 --retry-all-errors \
+            "https://github.com/Wkrotik/OrbisFox/releases/download/v0.69-alpha/OrbisFox-0.69-alpha-Homebrew.pkg" \
+            -o "$RUNNER_TEMP/original/OrbisFox.pkg"
+          echo "079417b7777a869fab48d37ac1d52eb09d44d50e3d1dda23a46f26b5d7c52834  $RUNNER_TEMP/original/OrbisFox.pkg" | sha256sum --check -
+
+      - name: Build the open PKG utility
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone https://github.com/maxton/LibOrbisPkg.git "$RUNNER_TEMP/LibOrbisPkg"
+          git -C "$RUNNER_TEMP/LibOrbisPkg" checkout 643477263b2644e0803e0f58b8726ea4e3f3b7d4
+          sed -i 's/netcoreapp3\.0/net8.0/g' \
+            "$RUNNER_TEMP/LibOrbisPkg/LibOrbisPkg.Core/LibOrbisPkg.Core.csproj" \
+            "$RUNNER_TEMP/LibOrbisPkg/PkgTool.Core/PkgTool.Core.csproj"
+          dotnet publish "$RUNNER_TEMP/LibOrbisPkg/PkgTool.Core/PkgTool.Core.csproj" \
+            --configuration Release --framework net8.0 \
+            --output "$RUNNER_TEMP/pkgtool"
+
+      - name: Rebrand and build Discord TV PKG
+        run: |
+          python scripts/build-discord-tv-pkg.py \
+            --pkgtool "$RUNNER_TEMP/pkgtool/PkgTool.Core.dll" \
+            --source-pkg "$RUNNER_TEMP/original/OrbisFox.pkg" \
+            --output-dir "$GITHUB_WORKSPACE/dist/discord-tv"
+
+      - name: Upload installable PKG and verification report
+        uses: actions/upload-artifact@v4
+        with:
+          name: Discord-TV-PS4-PKG
+          path: |
+            dist/discord-tv/Discord-TV-PS4.pkg
+            dist/discord-tv/SHA256SUMS.txt
+            dist/discord-tv/BUILD-REPORT.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
